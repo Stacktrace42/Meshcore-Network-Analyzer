@@ -51,7 +51,7 @@ jobs:
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
-                org.opencontainers.image.visibility=public            
+            org.opencontainers.image.visibility=public            
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -96,6 +96,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.visibility=public            
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -140,6 +142,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix={{branch}}-
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.visibility=public            
 
       - name: Build and push
         uses: docker/build-push-action@v5
