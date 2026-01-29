@@ -67,15 +67,23 @@ The Meshcore Network Analyzer consists of three Docker containers:
 
 ### Admin Dashboard
 - **System statistics** - Repeaters, listeners, paths, traces
-- **Listener management** - Register and manage network listeners
+- **Listener management** - Web UI for adding, editing, and removing listeners
+  - Create new listeners and get API keys (shown once)
+  - Copy listener IDs for configuration
+  - Edit listener names
+  - Deactivate listeners (preserves historical data)
 - **Trace management** - View, filter, pause/resume trace scheduling
-- **API key generation** - Admin, listener, and visualization keys
+- **Configuration management** - Edit system settings via web UI
 
 ## Prerequisites
 
 - Docker and Docker Compose
 - MeshCore hardware device connected via USB (typically `/dev/ttyUSB0`)
 - Linux host (for USB device passthrough)
+
+**Platform Support:**
+- Multi-platform Docker images supporting both **AMD64 (x86_64)** and **ARM64 (aarch64)**
+- Runs on standard PCs, Raspberry Pi, and other ARM-based systems
 
 ## Quick Start
 
@@ -97,11 +105,13 @@ DB_PASSWORD=your-secure-database-password
 # Admin API key (use a strong random key)
 ADMIN_API_KEY=your-secure-admin-api-key
 
-# Listener configuration
-LISTENER_ID=$(uuidgen)  # Generate a unique UUID
-LISTENER_NAME="My Listener"
-GPS_LAT=your-latitude
-GPS_LON=your-longitude
+# Automatic Listener Initialization (recommended for first-time setup)
+INIT_LISTENER_NAME="My Meshcore Listener"
+INIT_LISTENER_API_KEY=generate-a-secure-random-key-here
+
+# Listener configuration (LISTENER_ID will be auto-generated on first start)
+LISTENER_NAME="My Meshcore Listener"
+LISTENER_API_KEY=generate-a-secure-random-key-here
 DEVICE_PATH=/dev/ttyUSB0  # Your MeshCore device path
 ```
 
@@ -111,46 +121,14 @@ DEVICE_PATH=/dev/ttyUSB0  # Your MeshCore device path
 docker-compose up -d
 ```
 
-### 4. Initialize the System
+### 4. Access the Application
 
-#### Create Listener API Key
+The system will automatically initialize on first startup:
+- Database tables will be created
+- Admin API key will be registered
+- Listener will be auto-created with the specified name and API key
 
-```bash
-curl -X POST http://localhost:8000/api/v1/admin/listeners \
-  -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "My Listener",
-    "gps_lat": YOUR_LAT,
-    "gps_lon": YOUR_LON
-  }'
-```
-
-Save the returned `api_key` and update `.env`:
-
-```bash
-LISTENER_API_KEY=<api_key_from_response>
-```
-
-#### Create Visualization API Key
-
-```bash
-curl -X POST http://localhost:8000/api/v1/admin/api-keys \
-  -H "Authorization: Bearer YOUR_ADMIN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key_type": "visualization",
-    "description": "Web UI access"
-  }'
-```
-
-### 5. Restart Listener
-
-```bash
-docker-compose restart listener
-```
-
-### 6. Access the Application
+**Note:** Check the logs after first startup to get the auto-generated `LISTENER_ID`, then add it to your `.env` file for consistency.
 
 - **Visualization UI**: http://localhost:3000
 - **API Documentation**: http://localhost:8000/docs
@@ -242,9 +220,10 @@ All traces must form a **loop** through the gateway repeater to ensure responses
 ### Example
 
 To verify edge `0x4d → 0xd7` with gateway `0x84`:
-- **Trace sent:** `84,d7,4d,84` (gateway → dest → source → gateway)
+- **Calculated path:** `['0x84', '0xd7', '0x4d', '0x84']` (stored in database)
+- **Trace sent to device:** `84,d7,4d,84` (comma-separated, no 0x prefix)
 - **Response received:** With SNR values for each hop
-- **Result stored:** `0x84(-3.4)→0xd7(12.0)→0x4d(8.5)→0x84(10.2)`
+- **Result stored:** `0x84(-3.4)→0xd7(12.0)→0x4d(8.5)→0x84(10.2)` (formatted with SNR)
 
 ### Scheduling and Cleanup
 

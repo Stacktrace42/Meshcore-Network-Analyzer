@@ -102,6 +102,10 @@ class ListenerCreate(BaseModel):
     name: str
 
 
+class ListenerUpdate(BaseModel):
+    name: Optional[str] = None
+
+
 class ListenerResponse(BaseModel):
     id: UUID
     name: str
@@ -122,6 +126,7 @@ class PendingTraceResponse(BaseModel):
     from_repeater_public_key: Optional[str] = None
     to_repeater_public_key: Optional[str] = None
     scheduled_at: datetime
+    calculated_path: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

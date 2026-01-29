@@ -133,6 +133,7 @@ export default function ConfigPage({ apiKey, onLogout }: ConfigPageProps) {
           <Link to="/map" style={{ color: '#4CAF50', textDecoration: 'none' }}>Map</Link>
           <Link to="/admin" style={{ color: '#4CAF50', textDecoration: 'none' }}>Dashboard</Link>
           <Link to="/traces" style={{ color: '#4CAF50', textDecoration: 'none' }}>Traces</Link>
+          <Link to="/listeners" style={{ color: '#4CAF50', textDecoration: 'none' }}>Listeners</Link>
           <button onClick={onLogout} style={{
             padding: '0.5rem 1rem',
             background: '#f44336',

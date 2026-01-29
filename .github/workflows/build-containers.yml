@@ -57,6 +57,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./processing
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -103,6 +104,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./listener
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -149,6 +151,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./visualization
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

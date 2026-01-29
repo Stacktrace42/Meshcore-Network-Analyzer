@@ -67,6 +67,9 @@ export default function AdminDashboard({ apiKey, onLogout }: AdminDashboardProps
           <Link to="/traces" style={{ color: '#4CAF50', textDecoration: 'none' }}>
             Traces
           </Link>
+          <Link to="/listeners" style={{ color: '#4CAF50', textDecoration: 'none' }}>
+            Listeners
+          </Link>
           <Link to="/config" style={{ color: '#4CAF50', textDecoration: 'none' }}>
             Configuration
           </Link>

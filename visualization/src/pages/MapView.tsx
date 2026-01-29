@@ -232,6 +232,12 @@ export default function MapView({ apiKey, onLogout }: MapViewProps) {
           <Link to="/traces" style={{ color: '#4CAF50', textDecoration: 'none' }}>
             Traces
           </Link>
+          <Link to="/listeners" style={{ color: '#4CAF50', textDecoration: 'none' }}>
+            Listeners
+          </Link>
+          <Link to="/config" style={{ color: '#4CAF50', textDecoration: 'none' }}>
+            Config
+          </Link>
           <button onClick={onLogout} style={{
             padding: '0.5rem 1rem',
             background: '#f44336',

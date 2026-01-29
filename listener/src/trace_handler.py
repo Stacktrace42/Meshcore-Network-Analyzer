@@ -91,6 +91,7 @@ class TraceHandler:
         from_hash = trace_info.get("from_repeater_hash")  # Source of edge
         to_hash = trace_info.get("to_repeater_hash")  # Destination of edge
         to_pubkey = trace_info.get("to_repeater_public_key")
+        calculated_path = trace_info.get("calculated_path")  # Pre-computed optimal path
 
         logger.info(f"Executing trace {trace_id}: verifying edge {from_hash}→{to_hash}")
 
@@ -105,31 +106,39 @@ class TraceHandler:
             # In MeshCore, traces are typically sent as CLI commands
             # Format: "trace <destination>"
 
-            # Get gateway repeater (nearest repeater with best SNR)
-            gateway_hash = self._get_gateway_repeater()
+            # Use pre-calculated path if available, otherwise build a simple path
+            if calculated_path and len(calculated_path) >= 2:
+                # Use the path calculated by the trace scheduler
+                # Remove "0x" prefix from each hop and join with commas
+                trace_path = ",".join([hop.replace('0x', '') for hop in calculated_path])
+                logger.info(f"Trace {trace_id} using calculated path: {trace_path}")
+            else:
+                # Fallback: Build simple loop path if no calculated path available
+                # Get gateway repeater (nearest repeater with best SNR)
+                gateway_hash = self._get_gateway_repeater()
 
-            if not gateway_hash:
-                logger.error(f"No gateway repeater available for trace {trace_id}")
-                await self.api_client.submit_trace_result(
-                    trace_id,
-                    success=False,
-                    error="No gateway repeater available"
-                )
-                return
+                if not gateway_hash:
+                    logger.error(f"No gateway repeater available for trace {trace_id}")
+                    await self.api_client.submit_trace_result(
+                        trace_id,
+                        success=False,
+                        error="No gateway repeater available"
+                    )
+                    return
 
-            # Build loop path: Gateway → To → From → Gateway
-            # This verifies edge From→To by checking reverse path To→From
-            # and ensures response comes back through gateway
-            trace_path = f"{gateway_hash.replace('0x', '')},{to_hash.replace('0x', '')}"
+                # Build loop path: Gateway → To → From → Gateway
+                # This verifies edge From→To by checking reverse path To→From
+                # and ensures response comes back through gateway
+                trace_path = f"{gateway_hash.replace('0x', '')},{to_hash.replace('0x', '')}"
 
-            # Add return path through from_hash if it's different from gateway
-            if from_hash and from_hash != gateway_hash:
-                trace_path += f",{from_hash.replace('0x', '')}"
+                # Add return path through from_hash if it's different from gateway
+                if from_hash and from_hash != gateway_hash:
+                    trace_path += f",{from_hash.replace('0x', '')}"
 
-            # Close the loop back to gateway
-            trace_path += f",{gateway_hash.replace('0x', '')}"
+                # Close the loop back to gateway
+                trace_path += f",{gateway_hash.replace('0x', '')}"
 
-            logger.info(f"Trace {trace_id} path: {trace_path}")
+                logger.info(f"Trace {trace_id} using fallback path: {trace_path}")
 
             # Send trace command using MeshCore
             try:

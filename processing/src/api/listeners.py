@@ -201,7 +201,8 @@ async def get_pending_traces(
             to_repeater_hash=trace.to_repeater.hash,
             from_repeater_public_key=trace.from_repeater.public_key.hex() if trace.from_repeater.public_key else None,
             to_repeater_public_key=trace.to_repeater.public_key.hex() if trace.to_repeater.public_key else None,
-            scheduled_at=trace.scheduled_at
+            scheduled_at=trace.scheduled_at,
+            calculated_path=trace.calculated_path
         ))
 
     return response

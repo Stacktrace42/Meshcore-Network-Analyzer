@@ -173,6 +173,8 @@ export default function TracesPage({ apiKey, onLogout }: TracesPageProps) {
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <Link to="/" style={{ color: '#4CAF50', textDecoration: 'none' }}>Map</Link>
           <Link to="/admin" style={{ color: '#4CAF50', textDecoration: 'none' }}>Dashboard</Link>
+          <Link to="/listeners" style={{ color: '#4CAF50', textDecoration: 'none' }}>Listeners</Link>
+          <Link to="/config" style={{ color: '#4CAF50', textDecoration: 'none' }}>Config</Link>
           <button onClick={onLogout} style={{
             padding: '0.5rem 1rem',
             background: '#f44336',

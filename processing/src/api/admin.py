@@ -9,7 +9,7 @@ import logging
 from ..database import get_db
 from ..models import Listener, APIKey as APIKeyModel, TraceSchedule, Repeater, SystemConfig
 from ..schemas import (
-    ListenerCreate, ListenerResponse, APIKeyCreate, APIKeyResponse,
+    ListenerCreate, ListenerUpdate, ListenerResponse, APIKeyCreate, APIKeyResponse,
     TraceConfigUpdate, TraceConfigResponse, TraceScheduleResponse, TraceSchedulerStatus
 )
 from .auth import require_admin, generate_api_key, hash_api_key
@@ -69,6 +69,32 @@ async def list_listeners(
     """List all listeners."""
     listeners = db.query(Listener).all()
     return [ListenerResponse.from_orm(l) for l in listeners]
+
+
+@router.put("/listeners/{listener_id}", response_model=ListenerResponse)
+async def update_listener(
+    listener_id: str,
+    listener_update: ListenerUpdate,
+    api_key = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Update listener details (name only)."""
+    listener = db.query(Listener).filter(Listener.id == listener_id).first()
+    if not listener:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Listener not found"
+        )
+
+    if listener_update.name is not None:
+        listener.name = listener_update.name
+
+    db.commit()
+    db.refresh(listener)
+
+    logger.info(f"Updated listener: {listener.name}")
+
+    return ListenerResponse.from_orm(listener)
 
 
 @router.delete("/listeners/{listener_id}")
