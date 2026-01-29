@@ -1,0 +1,86 @@
+version: '3.8'
+
+# Production docker-compose - pulls pre-built images from GitHub Container Registry
+# Usage: docker-compose pull && docker-compose up
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: meshcore_postgres
+    environment:
+      POSTGRES_DB: meshcore_analyzer
+      POSTGRES_USER: meshcore
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meshcore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - meshcore_network
+
+  processing:
+    image: ghcr.io/stacktrace42/meshcore-analyzer-processing:latest
+    container_name: meshcore_processing
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://meshcore:${DB_PASSWORD}@postgres:5432/meshcore_analyzer
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TRACE_THROTTLE_SECONDS: ${TRACE_THROTTLE_SECONDS:-30}
+      TRACE_VERIFICATION_INTERVAL_HOURS: ${TRACE_VERIFICATION_INTERVAL_HOURS:-24}
+      GRAPH_REBUILD_INTERVAL_MINUTES: ${GRAPH_REBUILD_INTERVAL_MINUTES:-5}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - meshcore_network
+
+  listener:
+    image: ghcr.io/stacktrace42/meshcore-analyzer-listener:latest
+    container_name: meshcore_listener
+    depends_on:
+      - processing
+    environment:
+      PROCESSING_URL: http://processing:8000
+      LISTENER_API_KEY: ${LISTENER_API_KEY}
+      LISTENER_ID: ${LISTENER_ID}
+      LISTENER_NAME: ${LISTENER_NAME:-Meshcore Listener}
+      GPS_LAT: ${GPS_LAT}
+      GPS_LON: ${GPS_LON}
+      DEVICE_PATH: ${DEVICE_PATH:-/dev/ttyUSB0}
+      DEVICE_BAUD_RATE: ${DEVICE_BAUD_RATE:-115200}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-30}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    devices:
+      - "${DEVICE_PATH:-/dev/ttyUSB0}:${DEVICE_PATH:-/dev/ttyUSB0}"
+    restart: unless-stopped
+    networks:
+      - meshcore_network
+
+  visualization:
+    image: ghcr.io/stacktrace42/meshcore-analyzer-visualization:latest
+    container_name: meshcore_visualization
+    depends_on:
+      - processing
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    networks:
+      - meshcore_network
+
+volumes:
+  postgres_data:
+
+networks:
+  meshcore_network:
+    driver: bridge

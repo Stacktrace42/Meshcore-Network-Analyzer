@@ -1,0 +1,13 @@
+version: '3.8'
+
+# Optional development overrides - mounts source code for live editing
+# Usage: docker-compose -f docker-compose.build.yml -f docker-compose.override.yml up
+
+services:
+  processing:
+    volumes:
+      - ./processing/src:/app/src
+
+  listener:
+    volumes:
+      - ./listener/src:/app/src
