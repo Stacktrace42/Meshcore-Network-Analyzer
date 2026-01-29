@@ -164,13 +164,62 @@ class TraceSchedulerService:
                 skipped_listener_limit += 1
                 continue  # Listener at capacity
 
+            # Calculate loop trace path: Gateway → From → To → Gateway
+            # Gateway is the repeater this listener can hear best (from ANY repeater, not just the edge)
+            gateway = self._find_best_repeater_for_listener(assigned_listener)
+
+            if not gateway:
+                logger.warning(f"No gateway found for listener {assigned_listener.name}")
+                continue
+
+            from_hash = edge.from_repeater.hash
+            to_hash = edge.to_repeater.hash
+
+            # Try to build full loop path with routes TO and FROM the edge
+            # Gateway → (route to from) → From → To → (route from to back to gateway) → Gateway
+
+            # First try: Find if gateway directly connects to from or to
+            # If gateway == from or gateway == to, we can do a simple 3-hop loop
+            if gateway.hash == from_hash:
+                # Gateway is the from repeater: Gateway → To → Gateway
+                path_from_to_back = self._find_path_between_repeaters(to_hash, gateway.hash)
+                if path_from_to_back and len(path_from_to_back) >=2:
+                    calculated_path = [gateway.hash, to_hash] + path_from_to_back[1:]
+                else:
+                    # Simple 2-hop loop
+                    calculated_path = [gateway.hash, to_hash, gateway.hash]
+            elif gateway.hash == to_hash:
+                # Gateway is the to repeater: Gateway → From → Gateway
+                path_to_from = self._find_path_between_repeaters(gateway.hash, from_hash)
+                if path_to_from and len(path_to_from) >= 2:
+                    calculated_path = path_to_from + [gateway.hash]
+                else:
+                    # Simple 2-hop loop
+                    calculated_path = [gateway.hash, from_hash, gateway.hash]
+            else:
+                # Gateway is separate - need full routing
+                path_to_from = self._find_path_between_repeaters(gateway.hash, from_hash)
+                path_from_to_back = self._find_path_between_repeaters(to_hash, gateway.hash)
+
+                if not path_to_from or not path_from_to_back:
+                    logger.debug(
+                        f"Cannot build full trace path, skipping edge "
+                        f"(gateway={gateway.hash}, from={from_hash}, to={to_hash})"
+                    )
+                    continue
+
+                # Build complete loop: gateway + path_to_from[1:] + [to] + path_from_to_back[1:]
+                calculated_path = [gateway.hash] + path_to_from[1:] + [to_hash] + path_from_to_back[1:]
+
             # Create trace schedule
             trace = TraceSchedule(
                 from_repeater_id=edge.from_repeater_id,
                 to_repeater_id=edge.to_repeater_id,
                 assigned_listener_id=assigned_listener.id,
                 status="pending",
-                scheduled_at=next_schedule_time
+                scheduled_at=next_schedule_time,
+                calculated_path=calculated_path,
+                path_strategy="loop"
             )
             self.db.add(trace)
 
@@ -194,47 +243,63 @@ class TraceSchedulerService:
         """
         Select the best listener to execute a trace.
 
-        Choose the listener closest to the starting repeater.
+        Choose the listener with best reception quality from the starting repeater,
+        based on message count and average SNR.
         """
-        # Get all active listeners with GPS coordinates
-        listeners = self.db.query(Listener).filter(
-            Listener.active == True,
-            Listener.gps_lat.isnot(None),
-            Listener.gps_lon.isnot(None)
-        ).all()
+        from sqlalchemy import func
+
+        # Get all active listeners
+        listeners = self.db.query(Listener).filter(Listener.active == True).all()
 
         if not listeners:
-            logger.warning("No active listeners with GPS found")
+            logger.warning("No active listeners found")
             return None
 
-        if not from_repeater.gps_lat or not from_repeater.gps_lon:
-            # No GPS for repeater, just return first listener
+        if len(listeners) == 1:
             return listeners[0]
 
-        # Find closest listener
+        # Find listener with best reception from from_repeater
+        # Look for paths where from_repeater is in the path (anywhere in the route)
         best_listener = None
-        min_distance = float('inf')
+        best_score = float('-inf')
 
         for listener in listeners:
-            # Create a temporary repeater object to use distance calculation
-            listener_as_repeater = Repeater(
-                gps_lat=listener.gps_lat,
-                gps_lon=listener.gps_lon
-            )
+            from sqlalchemy import cast, func
+            from sqlalchemy.dialects.postgresql import JSONB
 
-            distance = calculate_distance(from_repeater, listener_as_repeater)
+            # Query paths from this listener where from_repeater appears
+            # Use PostgreSQL's JSONB containment operator: path::jsonb @> '["hash"]'::jsonb
+            paths = self.db.query(Path).filter(
+                Path.listener_id == listener.id,
+                func.cast(Path.path, JSONB).op('@>')(func.cast(f'["{from_repeater.hash}"]', JSONB)),
+                Path.snr_source == 'reception'
+            ).all()
 
-            if distance is not None and distance < min_distance:
-                min_distance = distance
+            if not paths:
+                continue
+
+            # Calculate score based on message count and average SNR
+            message_count = len(paths)
+            avg_snr = sum(p.snr for p in paths if p.snr is not None) / len([p for p in paths if p.snr is not None]) if any(p.snr is not None for p in paths) else 0
+
+            # Score formula: prioritize message count, use SNR as tiebreaker
+            # Each message = 1 point, each dB of SNR = 0.1 points
+            score = message_count + (avg_snr * 0.1)
+
+            if score > best_score:
+                best_score = score
                 best_listener = listener
 
         if best_listener:
             logger.info(
-                f"Selected listener {best_listener.name} "
-                f"(distance: {min_distance:.2f} km) for trace"
+                f"Selected listener {best_listener.name} for trace "
+                f"(reception score: {best_score:.1f})"
             )
+            return best_listener
 
-        return best_listener or listeners[0]
+        # Fallback: return first active listener
+        logger.warning(f"No reception data found for repeater {from_repeater.hash}, using first listener")
+        return listeners[0]
 
     def get_pending_traces_for_listener(
         self,
@@ -358,14 +423,196 @@ class TraceSchedulerService:
             "gateway_hash": gateway.hash
         }
 
-    def _find_best_gateway_for_segment(self, segment: list) -> Optional[Repeater]:
-        """Find the best gateway repeater for a path segment."""
-        # Get all active listeners
-        listeners = self.db.query(Listener).filter(
-            Listener.active == True,
-            Listener.gps_lat.isnot(None),
-            Listener.gps_lon.isnot(None)
+    def _find_path_between_repeaters(
+        self,
+        from_hash: str,
+        to_hash: str
+    ) -> Optional[list]:
+        """Find a path from one repeater to another using captured path data.
+
+        Returns a list of hashes representing the route, or None if no path found.
+        The returned path includes both from_hash and to_hash.
+        """
+        # Special case: if from and to are the same, return single-element path
+        if from_hash == to_hash:
+            return [from_hash]
+
+        # Query all recent paths that contain both repeaters
+        from sqlalchemy import cast, func
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        # Get paths that contain both hashes
+        paths = self.db.query(Path).filter(
+            func.cast(Path.path, JSONB).op('@>')(func.cast(f'["{from_hash}", "{to_hash}"]', JSONB))
+        ).order_by(Path.timestamp.desc()).limit(50).all()
+
+        if not paths:
+            # Try to find any path containing the destination
+            # and build a route through multiple hops if needed
+            logger.debug(f"No direct path found from {from_hash} to {to_hash}")
+            return None
+
+        # Find the shortest segment that goes from from_hash to to_hash
+        best_path = None
+        min_length = float('inf')
+
+        for path_record in paths:
+            path_hashes = path_record.path
+
+            # Find indices of from and to
+            try:
+                from_idx = path_hashes.index(from_hash)
+                to_idx = path_hashes.index(to_hash)
+
+                # We want from to appear before to in the path
+                if from_idx < to_idx:
+                    segment = path_hashes[from_idx:to_idx + 1]
+                    if len(segment) < min_length:
+                        min_length = len(segment)
+                        best_path = segment
+            except ValueError:
+                # One of the hashes not in this path (shouldn't happen due to filter)
+                continue
+
+        if best_path:
+            logger.debug(f"Found path from {from_hash} to {to_hash}: {best_path}")
+            return best_path
+
+        logger.debug(f"No valid path found from {from_hash} to {to_hash}")
+        return None
+
+    def _find_best_repeater_for_listener(
+        self,
+        listener: Listener
+    ) -> Optional[Repeater]:
+        """Find the repeater that this listener can hear best (overall).
+
+        Returns the repeater with best reception quality from this listener.
+        """
+        from sqlalchemy import cast, func
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        # Get all paths from this listener with reception SNR
+        paths = self.db.query(Path).filter(
+            Path.listener_id == listener.id,
+            Path.snr_source == 'reception',
+            Path.snr.isnot(None)
         ).all()
+
+        logger.debug(f"Found {len(paths)} reception paths for listener {listener.name} (ID: {listener.id})")
+
+        if not paths:
+            logger.warning(f"No reception paths found for listener {listener.name} (ID: {listener.id})")
+            # Try without SNR requirement to see if snr_source is the issue
+            all_paths = self.db.query(Path).filter(
+                Path.listener_id == listener.id,
+                Path.snr_source == 'reception'
+            ).all()
+            logger.debug(f"Total reception paths (including NULL SNR): {len(all_paths)}")
+            return None
+
+        # Count messages and calculate avg SNR per repeater
+        repeater_stats = {}  # hash -> (message_count, total_snr, snr_count)
+
+        for path in paths:
+            # Count each repeater that appears in the path
+            for repeater_hash in path.path:
+                if repeater_hash not in repeater_stats:
+                    repeater_stats[repeater_hash] = [0, 0.0, 0]
+
+                repeater_stats[repeater_hash][0] += 1  # message count
+                if path.snr is not None:
+                    repeater_stats[repeater_hash][1] += path.snr  # total SNR
+                    repeater_stats[repeater_hash][2] += 1  # SNR count
+
+        # Find repeater with best score
+        best_hash = None
+        best_score = float('-inf')
+
+        for repeater_hash, (msg_count, total_snr, snr_count) in repeater_stats.items():
+            avg_snr = total_snr / snr_count if snr_count > 0 else 0
+            score = msg_count + (avg_snr * 0.1)
+
+            if score > best_score:
+                best_score = score
+                best_hash = repeater_hash
+
+        if not best_hash:
+            logger.warning(f"No repeaters found in reception paths for listener {listener.name}")
+            return None
+
+        # Get the Repeater object
+        repeater = self.db.query(Repeater).filter(Repeater.hash == best_hash).first()
+
+        if repeater:
+            logger.info(f"Best repeater for listener {listener.name}: {repeater.hash} (score: {best_score:.2f})")
+        else:
+            logger.warning(f"Repeater {best_hash} not found in database")
+
+        return repeater
+
+    def _find_best_gateway_for_listener(
+        self,
+        listener: Listener,
+        segment: list
+    ) -> Optional[Repeater]:
+        """Find the best gateway repeater for a specific listener and segment.
+
+        Returns the repeater in the segment that this listener can hear best.
+        """
+        from sqlalchemy import cast, func
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        # Get all repeaters in the segment
+        segment_repeaters = self.db.query(Repeater).filter(
+            Repeater.hash.in_(segment)
+        ).all()
+
+        if not segment_repeaters:
+            logger.debug(f"No repeaters found for segment {segment}")
+            return None
+
+        # Find repeater with best reception quality from this listener
+        best_gateway = None
+        best_score = float('-inf')
+
+        for repeater in segment_repeaters:
+            # Query paths from this listener where repeater appears
+            # Use PostgreSQL's JSONB containment operator: path::jsonb @> '["hash"]'::jsonb
+            paths = self.db.query(Path).filter(
+                Path.listener_id == listener.id,
+                func.cast(Path.path, JSONB).op('@>')(func.cast(f'["{repeater.hash}"]', JSONB)),
+                Path.snr_source == 'reception'
+            ).all()
+
+            if not paths:
+                logger.debug(f"No paths found for repeater {repeater.hash} from listener {listener.name}")
+                continue
+
+            message_count = len(paths)
+            avg_snr = sum(p.snr for p in paths if p.snr is not None) / len([p for p in paths if p.snr is not None]) if any(p.snr is not None for p in paths) else 0
+
+            score = message_count + (avg_snr * 0.1)
+            logger.debug(f"Repeater {repeater.hash}: {message_count} messages, avg SNR {avg_snr:.2f}, score {score:.2f}")
+
+            if score > best_score:
+                best_score = score
+                best_gateway = repeater
+
+        if best_gateway:
+            logger.info(f"Best gateway for listener {listener.name}: {best_gateway.hash} (score: {best_score:.2f})")
+        else:
+            logger.warning(f"No gateway found for listener {listener.name} in segment {segment}")
+
+        return best_gateway
+
+    def _find_best_gateway_for_segment(self, segment: list) -> Optional[Repeater]:
+        """Find the best gateway repeater for a path segment.
+
+        Select the repeater with best reception quality across all listeners.
+        """
+        # Get all active listeners
+        listeners = self.db.query(Listener).filter(Listener.active == True).all()
 
         if not listeners:
             return None
@@ -378,23 +625,41 @@ class TraceSchedulerService:
         if not segment_repeaters:
             return None
 
-        # Find repeater closest to any listener
+        # Find repeater with best reception quality across all listeners
         best_gateway = None
-        min_distance = float('inf')
+        best_score = float('-inf')
 
         for repeater in segment_repeaters:
-            if not repeater.gps_lat or not repeater.gps_lon:
+            total_messages = 0
+            total_snr = 0
+            snr_count = 0
+
+            # Check reception quality from all listeners
+            for listener in listeners:
+                from sqlalchemy import cast, func
+                from sqlalchemy.dialects.postgresql import JSONB
+
+                paths = self.db.query(Path).filter(
+                    Path.listener_id == listener.id,
+                    func.cast(Path.path, JSONB).op('@>')(func.cast(f'["{repeater.hash}"]', JSONB)),
+                    Path.snr_source == 'reception'
+                ).all()
+
+                total_messages += len(paths)
+                for path in paths:
+                    if path.snr is not None:
+                        total_snr += path.snr
+                        snr_count += 1
+
+            if total_messages == 0:
                 continue
 
-            for listener in listeners:
-                listener_as_repeater = Repeater(
-                    gps_lat=listener.gps_lat,
-                    gps_lon=listener.gps_lon
-                )
-                distance = calculate_distance(repeater, listener_as_repeater)
-                if distance is not None and distance < min_distance:
-                    min_distance = distance
-                    best_gateway = repeater
+            avg_snr = total_snr / snr_count if snr_count > 0 else 0
+            score = total_messages + (avg_snr * 0.1)
+
+            if score > best_score:
+                best_score = score
+                best_gateway = repeater
 
         return best_gateway
 

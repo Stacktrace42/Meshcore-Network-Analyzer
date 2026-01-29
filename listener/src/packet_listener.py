@@ -165,12 +165,16 @@ class PacketListener:
             source_hash = path_hashes[0]
             dest_hash = path_hashes[-1]
 
+            # NOTE: SNR/RSSI here represent reception quality at the listener,
+            # NOT edge-to-edge signal quality. This data is used to determine
+            # which listener has the best connection to each repeater.
+            # Actual edge SNR values come from trace responses only.
             return {
                 "source_hash": source_hash,
                 "dest_hash": dest_hash,
                 "path": path_hashes,
-                "snr": snr,
-                "rssi": rssi
+                "reception_snr": snr,  # How well this listener heard this packet
+                "reception_rssi": rssi
             }
 
         except Exception as e:

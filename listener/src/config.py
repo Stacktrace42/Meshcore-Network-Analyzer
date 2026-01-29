@@ -14,8 +14,6 @@ class Settings(BaseSettings):
     # Listener identification
     listener_id: uuid.UUID
     listener_name: str = "Meshcore Listener"
-    gps_lat: Optional[float] = None
-    gps_lon: Optional[float] = None
 
     # Device configuration
     device_path: str = "/dev/ttyUSB0"

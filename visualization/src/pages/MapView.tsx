@@ -8,15 +8,18 @@ import 'leaflet/dist/leaflet.css'
 // Use relative URL so nginx can proxy to processing service
 const API_URL = ''
 
-// Component to automatically fit map bounds to show all repeaters
+// Component to automatically fit map bounds to show all repeaters (only on first load)
 function MapBoundsHandler({ bounds }: { bounds: [[number, number], [number, number]] }) {
   const map = useMap()
+  const [hasSetInitialBounds, setHasSetInitialBounds] = useState(false)
 
   useEffect(() => {
-    if (bounds) {
+    // Only auto-zoom on the first load, not on subsequent data updates
+    if (bounds && !hasSetInitialBounds) {
       map.fitBounds(bounds, { padding: [50, 50] })
+      setHasSetInitialBounds(true)
     }
-  }, [bounds, map])
+  }, [bounds, map, hasSetInitialBounds])
 
   return null
 }
@@ -269,7 +272,7 @@ export default function MapView({ apiKey, onLogout }: MapViewProps) {
             const toLat = toRepeater?.gps_lat ?? toRepeater?.estimated_gps_lat
             const toLon = toRepeater?.gps_lon ?? toRepeater?.estimated_gps_lon
 
-            if (!fromLat || !toLat) return null
+            if (!fromRepeater || !toRepeater || !fromLat || !toLat) return null
 
             const positions: [number, number][] = [
               [fromLat, fromLon!],

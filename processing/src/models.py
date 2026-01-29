@@ -15,8 +15,6 @@ class Listener(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
     api_key_hash = Column(String, unique=True, nullable=False)
-    gps_lat = Column(Float, nullable=True)
-    gps_lon = Column(Float, nullable=True)
     last_seen = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

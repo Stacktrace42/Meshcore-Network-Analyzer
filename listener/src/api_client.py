@@ -28,18 +28,9 @@ class ProcessingAPIClient:
             data: Data payload
         """
         try:
-            # Build GPS coordinates if available
-            gps = None
-            if settings.gps_lat is not None and settings.gps_lon is not None:
-                gps = {
-                    "lat": settings.gps_lat,
-                    "lon": settings.gps_lon
-                }
-
             # Build submission payload
             payload = {
                 "listener_id": str(self.listener_id),
-                "listener_gps": gps,
                 "timestamp": datetime.utcnow().isoformat(),
                 "data_type": data_type,
                 "data": data

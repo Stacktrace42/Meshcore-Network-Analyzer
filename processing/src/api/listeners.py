@@ -40,11 +40,6 @@ async def submit_data(
 
     listener.last_seen = datetime.utcnow()
 
-    # Update GPS if provided
-    if submission.listener_gps:
-        listener.gps_lat = submission.listener_gps.lat
-        listener.gps_lon = submission.listener_gps.lon
-
     # Process data based on type
     if submission.data_type == "path":
         await _process_path_data(submission, listener, db)
@@ -71,19 +66,24 @@ async def _process_path_data(submission: ListenerDataSubmission, listener: Liste
     week_number = submission.timestamp.isocalendar()[1]
 
     # Create path record
+    # NOTE: SNR here represents RECEPTION quality at the listener (how well
+    # this listener heard this packet). This is used to determine which listener
+    # has the best connection to each repeater. It is NOT used for edge coloring.
+    # Actual edge-to-edge SNR values come from trace responses only (snr_source='trace').
     path = Path(
         listener_id=listener.id,
         source_hash=data.get("source_hash"),
         dest_hash=data.get("dest_hash"),
         path=data.get("path", []),
-        snr=data.get("snr"),
-        rssi=data.get("rssi"),
+        snr=data.get("reception_snr"),  # Reception quality at listener
+        snr_source='reception',  # Indicates this was a regular packet observation
+        rssi=data.get("reception_rssi"),  # RSSI is listener-specific
         timestamp=submission.timestamp,
         week_number=week_number
     )
     db.add(path)
 
-    logger.info(f"Recorded path: {data.get('path')} with SNR {data.get('snr')}")
+    logger.info(f"Recorded path: {data.get('path')} with reception SNR {data.get('reception_snr')}")
 
 
 async def _process_contact_data(submission: ListenerDataSubmission, db: Session):
@@ -95,18 +95,46 @@ async def _process_contact_data(submission: ListenerDataSubmission, db: Session)
         logger.debug(f"Skipping non-repeater contact: {data.get('name')} ({data.get('hash')})")
         return
 
-    # Check if repeater exists
-    repeater = db.query(Repeater).filter(Repeater.hash == data.get("hash")).first()
+    # Check if repeater exists by public key first (unique identifier)
+    # If no public key provided, fall back to hash-only lookup
+    repeater = None
+    public_key_bytes = None
+    if data.get("public_key"):
+        public_key_bytes = bytes.fromhex(data.get("public_key").replace("0x", ""))
+        repeater = db.query(Repeater).filter(Repeater.public_key == public_key_bytes).first()
+
+    # If not found by public key, try by hash (for backwards compatibility)
+    # But only if the hash-matched repeater has no public key or same public key
+    if not repeater:
+        hash_match = db.query(Repeater).filter(Repeater.hash == data.get("hash")).first()
+        if hash_match:
+            # Check if this is the same repeater or a hash collision
+            if public_key_bytes is None or hash_match.public_key is None or hash_match.public_key == public_key_bytes:
+                repeater = hash_match
+            else:
+                # Hash collision: different public keys with same hash
+                # Don't update the existing one, create a new entry instead
+                logger.info(f"Hash collision detected for {data.get('hash')}: "
+                           f"existing={hash_match.public_key.hex()[:16]}, "
+                           f"new={public_key_bytes.hex()[:16]}")
+                repeater = None
 
     if repeater:
         # Update existing repeater
         repeater.last_seen = submission.timestamp
         if data.get("name"):
             repeater.name = data.get("name")
-        if data.get("gps_lat") is not None:
-            repeater.gps_lat = data.get("gps_lat")
-        if data.get("gps_lon") is not None:
-            repeater.gps_lon = data.get("gps_lon")
+
+        # Only update GPS if the new coordinates are valid (not 0,0)
+        # This prevents overwriting good GPS data with invalid/missing GPS data
+        new_lat = data.get("gps_lat")
+        new_lon = data.get("gps_lon")
+        if new_lat is not None and new_lon is not None:
+            # Only update if coordinates are not (0,0) or if existing coords are also (0,0)
+            if not (new_lat == 0.0 and new_lon == 0.0) or (repeater.gps_lat == 0.0 and repeater.gps_lon == 0.0):
+                repeater.gps_lat = new_lat
+                repeater.gps_lon = new_lon
+
         if data.get("public_key"):
             # Convert hex string to bytes
             repeater.public_key = bytes.fromhex(data.get("public_key").replace("0x", ""))
@@ -236,12 +264,18 @@ async def submit_trace_result(
         from ..models import Path
         week_number = datetime.utcnow().isocalendar()[1]
 
+        # For trace results, we use the average SNR across all hops as the overall path SNR
+        avg_snr = None
+        if result.snr_values and len(result.snr_values) > 0:
+            avg_snr = sum(result.snr_values) / len(result.snr_values)
+
         path_entry = Path(
             listener_id=trace.assigned_listener_id,
             source_hash=result.path[0] if len(result.path) > 0 else None,
             dest_hash=result.path[-1] if len(result.path) > 0 else None,
             path=result.path,
-            snr=result.snr_values[0] if result.snr_values and len(result.snr_values) > 0 else None,
+            snr=avg_snr,  # Average SNR from trace response
+            snr_source='trace',  # Indicates this came from an actual trace verification
             rssi=None,  # Trace doesn't provide RSSI
             timestamp=datetime.utcnow(),
             week_number=week_number

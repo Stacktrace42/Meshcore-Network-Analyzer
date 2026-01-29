@@ -198,7 +198,9 @@ async def get_traces(
             status=trace.status,
             scheduled_at=trace.scheduled_at,
             completed_at=trace.completed_at,
-            result=trace.result
+            result=trace.result,
+            calculated_path=trace.calculated_path,
+            path_strategy=trace.path_strategy
         ))
 
     return results

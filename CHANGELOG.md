@@ -1,6 +1,68 @@
 # Meshcore Network Analyzer - Changelog
 
-## [Latest] - 2026-01-28 17:10
+## [Latest] - 2026-01-29
+
+### Fixed: Critical Bug Fixes
+
+**Bug Fixes:**
+
+1. **Graph Edge Message Count Always Zero**
+   - **Problem:** Edge message counts always showed 0 despite paths existing
+   - **Root Cause:** Only counted paths with trace SNR, not all paths using the edge
+   - **Fix:** Separated message counting from SNR tracking in `graph_builder.py`
+   - **Result:** All 453 edges now show proper counts (1-125 messages)
+
+2. **Docker Build Failure**
+   - **Problem:** GitHub Actions workflow failed when building visualization container
+   - **Root Cause:** Lowercase `as` in multi-stage Dockerfile (should be uppercase `AS`)
+   - **Fix:** Changed `FROM node:20-alpine as build` to `FROM node:20-alpine AS build`
+   - **File:** `visualization/Dockerfile:2`
+
+3. **Trace Paths Missing Routing**
+   - **Problem:** Traces used simple 3-hop loops that couldn't work (nodes can't reach each other directly without flooding)
+   - **Solution:** Implemented path-based trace generation in `trace_scheduler.py`
+   - **Features:**
+     - Extracts viable paths from captured network traffic
+     - Builds full routing loops: Gateway → Path to From → From → To → Path back → Gateway
+     - Uses JSONB containment queries for efficient path searching
+     - Includes fallback logic for simple cases
+   - **Example:** Instead of `0xe8 → 0xe9 → 0xf5 → 0xe8`, now generates proper routes like `0xe8 → 0x1a → 0x94 → 0xe9 → 0xf5 → 0x94 → 0x1a → 0xe8`
+
+4. **Map Auto-Zoom on Every Update**
+   - **Problem:** Map re-centered and zoomed every 30 seconds on data refresh
+   - **Fix:** Added `hasSetInitialBounds` state to `MapBoundsHandler` component
+   - **Result:** Auto-zoom only happens on initial load, user can freely navigate
+   - **File:** `visualization/src/pages/MapView.tsx:11-22`
+
+5. **GPS Coordinates Overwritten with (0, 0)**
+   - **Problem:** Valid GPS coordinates replaced when listener sent data without GPS
+   - **Fix:** Only update GPS if new coordinates are not (0, 0) or existing are also (0, 0)
+   - **File:** `processing/src/api/listeners.py:107-115`
+
+6. **Hash Collision Handling**
+   - **Problem:** Different repeaters with same hash would overwrite each other
+   - **Root Cause:** Repeater lookup only used hash, not public key
+   - **Fix:**
+     - First check by public key (true unique identifier)
+     - Then check by hash with collision detection
+     - Create separate entries when hash matches but public key differs
+   - **Impact:** Prevents data loss when two repeaters share the same hash
+   - **File:** `processing/src/api/listeners.py:98-119`
+
+7. **Duplicate Listener Creation on Restart**
+   - **Problem:** New listener created every time container restarted
+   - **Root Cause:** Bcrypt generates different hash each time for same input
+   - **Fix:** Check for existing listener by name instead of API key hash
+   - **File:** `processing/init_db.py:143-151`
+
+**Database Changes:**
+- SNR values cleared and marked with source tracking (`snr_source` column)
+- Only trace results populate SNR now, not reception quality
+- Trace schedule includes `calculated_path` field for full routing
+
+---
+
+## 2026-01-28 17:10
 
 ### Added: Visualization Web UI Deployed ✅
 

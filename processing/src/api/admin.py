@@ -37,8 +37,6 @@ async def create_listener(
     db_listener = Listener(
         name=listener.name,
         api_key_hash=key_hash,
-        gps_lat=listener.gps_lat,
-        gps_lon=listener.gps_lon,
         active=True
     )
     db.add(db_listener)
@@ -203,7 +201,9 @@ async def get_traces(
             status=trace.status,
             scheduled_at=trace.scheduled_at,
             completed_at=trace.completed_at,
-            result=trace.result
+            result=trace.result,
+            calculated_path=trace.calculated_path,
+            path_strategy=trace.path_strategy
         ))
 
     return results

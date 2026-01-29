@@ -38,7 +38,6 @@ class TraceResultData(BaseModel):
 
 class ListenerDataSubmission(BaseModel):
     listener_id: UUID
-    listener_gps: Optional[GPSCoordinates] = None
     timestamp: datetime
     data_type: str  # "path", "contact", "trace_result"
     data: Dict[str, Any]  # Flexible data field
@@ -101,15 +100,11 @@ class GraphResponse(BaseModel):
 # Listener Management Schemas
 class ListenerCreate(BaseModel):
     name: str
-    gps_lat: Optional[float] = None
-    gps_lon: Optional[float] = None
 
 
 class ListenerResponse(BaseModel):
     id: UUID
     name: str
-    gps_lat: Optional[float] = None
-    gps_lon: Optional[float] = None
     last_seen: Optional[datetime] = None
     active: bool
     created_at: datetime
@@ -146,6 +141,8 @@ class TraceScheduleResponse(BaseModel):
     scheduled_at: datetime
     completed_at: Optional[datetime] = None
     result: Optional[Dict[str, Any]] = None
+    calculated_path: Optional[List[str]] = None  # Planned path for this trace
+    path_strategy: Optional[str] = None  # 'direct', 'loop', etc.
 
     class Config:
         from_attributes = True

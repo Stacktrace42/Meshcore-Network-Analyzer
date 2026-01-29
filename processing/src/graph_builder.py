@@ -127,8 +127,8 @@ def build_graph(db: Session, week_number: int = None):
         logger.info("No paths found for this week")
         return
 
-    # Dictionary to accumulate edge data: (from_id, to_id) -> [snr_values]
-    edge_data: Dict[Tuple[str, str], List[float]] = {}
+    # Dictionary to accumulate edge data: (from_id, to_id) -> {'messages': count, 'snr_values': []}
+    edge_data: Dict[Tuple[str, str], Dict] = {}
 
     # Process each path
     for path in paths:
@@ -175,17 +175,23 @@ def build_graph(db: Session, week_number: int = None):
             edge_key = (str(from_repeater.id), str(to_repeater.id))
 
             if edge_key not in edge_data:
-                edge_data[edge_key] = []
+                edge_data[edge_key] = {'messages': 0, 'snr_values': []}
 
-            if path.snr is not None:
-                edge_data[edge_key].append(path.snr)
+            # Count every path that uses this edge (regardless of SNR source)
+            edge_data[edge_key]['messages'] += 1
+
+            # Only use SNR from trace responses, not reception SNR
+            # Reception SNR is how well the listener heard the packet, not edge quality
+            if path.snr is not None and path.snr_source == 'trace':
+                edge_data[edge_key]['snr_values'].append(path.snr)
 
     logger.info(f"Found {len(edge_data)} unique edges after resolving collisions")
 
     # Create or update graph edges
-    for (from_id, to_id), snr_values in edge_data.items():
+    for (from_id, to_id), data in edge_data.items():
         # Calculate statistics
-        message_count = len(snr_values)
+        message_count = data['messages']
+        snr_values = data['snr_values']
         avg_snr = sum(snr_values) / len(snr_values) if snr_values else None
 
         # Update or create graph edge
